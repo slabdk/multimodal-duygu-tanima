@@ -4,9 +4,6 @@ import sys
 BASE_DIR = Path(__file__).resolve().parents[1]
 sys.path.append(str(BASE_DIR))
 
-from pathlib import Path
-import tempfile
-
 import joblib
 import numpy as np
 import streamlit as st
@@ -21,7 +18,6 @@ from src.utils.text_preprocessing import clean_text
 # -------------------------------------------------
 # CONFIG
 # -------------------------------------------------
-
 TEXT_MODEL_PATH = BASE_DIR / "models" / "text_model.pkl"
 TFIDF_PATH = BASE_DIR / "models" / "tfidf_vectorizer.pkl"
 IMAGE_MODEL_PATH = BASE_DIR / "models" / "best_image_model.pth"
@@ -105,6 +101,27 @@ image_transform = transforms.Compose([
 
 
 # -------------------------------------------------
+# HELPERS
+# -------------------------------------------------
+def label_to_turkish(label: str) -> str:
+    mapping = {
+        "angry": "Kızgın",
+        "fear": "Korku",
+        "happy": "Mutlu",
+        "sad": "Üzgün",
+        "surprise": "Sürpriz",
+    }
+    return mapping.get(label, label)
+
+
+def probs_to_dict(probs: np.ndarray) -> dict:
+    return {
+        label_to_turkish(label): float(prob)
+        for label, prob in zip(CLASS_NAMES, probs)
+    }
+
+
+# -------------------------------------------------
 # PREDICTION FUNCTIONS
 # -------------------------------------------------
 def predict_text(text: str) -> np.ndarray:
@@ -125,24 +142,46 @@ def predict_image(pil_image: Image.Image) -> np.ndarray:
     return probs.cpu().numpy()[0]
 
 
-def fuse_predictions(text_probs: np.ndarray, image_probs: np.ndarray) -> np.ndarray:
+# -------------------------------------------------
+# CONFIDENCE-AWARE FUSION
+# -------------------------------------------------
+def fuse_predictions(text_probs: np.ndarray, image_probs: np.ndarray):
+    text_idx = int(np.argmax(text_probs))
+    image_idx = int(np.argmax(image_probs))
+
+    text_conf = float(text_probs[text_idx])
+    image_conf = float(image_probs[image_idx])
+
+    text_label = CLASS_NAMES[text_idx]
+    image_label = CLASS_NAMES[image_idx]
+
+    # 1) Aynı tahminse direkt kabul et
+    if text_label == image_label:
+        final_probs = (text_probs + image_probs) / 2
+        final_label = text_label
+        reason = "Metin ve görsel model aynı duygu tahminini verdi."
+        return final_probs, final_label, reason, text_conf, image_conf
+
+    # 2) Text modeli çok güvenliyse text'i seç
+    if text_conf >= 0.60:
+        final_probs = text_probs
+        final_label = text_label
+        reason = "Metin modeli daha yüksek güvenle tahmin yaptı."
+        return final_probs, final_label, reason, text_conf, image_conf
+
+    # 3) Görsel model çok güvenliyse ve text kararsızsa görseli seç
+    if image_conf >= 0.75 and text_conf < 0.60:
+        final_probs = image_probs
+        final_label = image_label
+        reason = "Görsel model daha yüksek güvenle tahmin yaptı."
+        return final_probs, final_label, reason, text_conf, image_conf
+
+    # 4) İkisi de kararsızsa weighted average
     final_probs = TEXT_WEIGHT * text_probs + IMAGE_WEIGHT * image_probs
-    return final_probs
-
-
-def probs_to_dict(probs: np.ndarray) -> dict:
-    return {label: float(prob) for label, prob in zip(CLASS_NAMES, probs)}
-
-
-def label_to_turkish(label: str) -> str:
-    mapping = {
-        "angry": "Kızgın",
-        "fear": "Korku",
-        "happy": "Mutlu",
-        "sad": "Üzgün",
-        "surprise": "Sürpriz",
-    }
-    return mapping.get(label, label)
+    final_idx = int(np.argmax(final_probs))
+    final_label = CLASS_NAMES[final_idx]
+    reason = "İki modelin olasılıkları ağırlıklı olarak birleştirildi."
+    return final_probs, final_label, reason, text_conf, image_conf
 
 
 # -------------------------------------------------
@@ -186,11 +225,13 @@ if analyze_clicked:
 
     text_probs = predict_text(user_text)
     image_probs = predict_image(pil_image)
-    final_probs = fuse_predictions(text_probs, image_probs)
 
     text_pred = CLASS_NAMES[int(np.argmax(text_probs))]
     image_pred = CLASS_NAMES[int(np.argmax(image_probs))]
-    fusion_pred = CLASS_NAMES[int(np.argmax(final_probs))]
+
+    final_probs, fusion_pred, fusion_reason, text_conf, image_conf = fuse_predictions(
+        text_probs, image_probs
+    )
 
     st.subheader("Sonuçlar")
 
@@ -199,17 +240,20 @@ if analyze_clicked:
     with result_col1:
         st.markdown("### Metin Modeli")
         st.write(f"**Tahmin:** {label_to_turkish(text_pred)}")
+        st.write(f"**Güven:** {text_conf:.2f}")
         st.json(probs_to_dict(text_probs))
 
     with result_col2:
         st.markdown("### Görsel Model")
         st.write(f"**Tahmin:** {label_to_turkish(image_pred)}")
+        st.write(f"**Güven:** {image_conf:.2f}")
         st.image(pil_image, caption="Yüklenen görsel", width=220)
         st.json(probs_to_dict(image_probs))
 
     with result_col3:
         st.markdown("### Fusion Sonucu")
         st.write(f"**Nihai Tahmin:** {label_to_turkish(fusion_pred)}")
+        st.write(f"**Karar Nedeni:** {fusion_reason}")
         st.json(probs_to_dict(final_probs))
 
     st.success(f"Nihai duygu tahmini: {label_to_turkish(fusion_pred)}")
