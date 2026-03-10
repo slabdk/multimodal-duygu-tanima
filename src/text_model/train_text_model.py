@@ -6,6 +6,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, classification_report
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 import matplotlib.pyplot as plt
+import joblib
 
 from src.utils.text_preprocessing import clean_text
 
@@ -89,3 +90,14 @@ fig, ax = plt.subplots(figsize=(8, 6))
 disp.plot(ax=ax, cmap="Blues", values_format="d")
 plt.title("Text Model Confusion Matrix")
 plt.show()
+
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parents[2]
+
+# modeli ve vectorizer'ı kaydet
+joblib.dump(model, BASE_DIR / "models" / "text_model.pkl")
+joblib.dump(vectorizer, BASE_DIR / "models" / "tfidf_vectorizer.pkl")
+
+print("Text model kaydedildi.")
+print("TF-IDF vectorizer kaydedildi.")
