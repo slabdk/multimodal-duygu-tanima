@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+import cv2
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 sys.path.append(str(BASE_DIR))
@@ -120,6 +121,34 @@ def probs_to_dict(probs: np.ndarray) -> dict:
         for label, prob in zip(CLASS_NAMES, probs)
     }
 
+def detect_and_crop_face(pil_image: Image.Image):
+    # PIL -> OpenCV
+    image_np = np.array(pil_image.convert("RGB"))
+    gray = cv2.cvtColor(image_np, cv2.COLOR_RGB2GRAY)
+
+    face_cascade = cv2.CascadeClassifier(
+        cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+    )
+
+    faces = face_cascade.detectMultiScale(
+        gray,
+        scaleFactor=1.1,
+        minNeighbors=5,
+        minSize=(50, 50)
+    )
+
+    if len(faces) == 0:
+        return None, 0
+
+    # En büyük yüzü al
+    faces = sorted(faces, key=lambda x: x[2] * x[3], reverse=True)
+    x, y, w, h = faces[0]
+
+    cropped_face = image_np[y:y + h, x:x + w]
+    cropped_pil = Image.fromarray(cropped_face)
+
+    return cropped_pil, len(faces)
+
 
 # -------------------------------------------------
 # PREDICTION FUNCTIONS
@@ -132,14 +161,19 @@ def predict_text(text: str) -> np.ndarray:
 
 
 def predict_image(pil_image: Image.Image) -> np.ndarray:
-    image = image_transform(pil_image)
+    face_image, face_count = detect_and_crop_face(pil_image)
+
+    if face_image is None:
+        raise ValueError("Yüz tespit edilemedi.")
+
+    image = image_transform(face_image)
     image = image.unsqueeze(0).to(device)
 
     with torch.no_grad():
         outputs = image_model(image)
         probs = torch.softmax(outputs, dim=1)
 
-    return probs.cpu().numpy()[0]
+    return probs.cpu().numpy()[0], face_image, face_count
 
 
 # -------------------------------------------------
@@ -224,7 +258,11 @@ if analyze_clicked:
         st.stop()
 
     text_probs = predict_text(user_text)
-    image_probs = predict_image(pil_image)
+    try:
+        image_probs, face_image, face_count = predict_image(pil_image)
+    except Exception as e:
+        st.error(f"Görsel analiz hatası: {e}")
+        st.stop()
 
     text_pred = CLASS_NAMES[int(np.argmax(text_probs))]
     image_pred = CLASS_NAMES[int(np.argmax(image_probs))]
@@ -247,7 +285,7 @@ if analyze_clicked:
         st.markdown("### Görsel Model")
         st.write(f"**Tahmin:** {label_to_turkish(image_pred)}")
         st.write(f"**Güven:** {image_conf:.2f}")
-        st.image(pil_image, caption="Yüklenen görsel", width=220)
+        st.image(face_image, caption=f"Tespit edilen yüz (bulunan yüz sayısı: {face_count})", width=220)
         st.json(probs_to_dict(image_probs))
 
     with result_col3:

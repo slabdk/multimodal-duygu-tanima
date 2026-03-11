@@ -4,8 +4,8 @@ import joblib
 import matplotlib.pyplot as plt
 import pandas as pd
 from huggingface_hub import hf_hub_download
-from sklearn.ensemble import RandomForestClassifier
 from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
     accuracy_score,
     classification_report,
@@ -40,10 +40,7 @@ df = pd.read_csv(
     on_bad_lines="skip",
 )
 
-# Eksik text verilerini kaldır
 df = df.dropna(subset=["text"]).copy()
-
-# Temizleme
 df["clean_text"] = df["text"].apply(clean_text)
 
 print("Veri boyutu:", df.shape)
@@ -80,12 +77,11 @@ print("TF-IDF test shape:", X_test_tfidf.shape)
 print("-" * 50)
 
 # -------------------------------------------------
-# RANDOM FOREST
+# LOGISTIC REGRESSION
 # -------------------------------------------------
-model = RandomForestClassifier(
-    n_estimators=200,
-    random_state=42,
-    n_jobs=-1,
+model = LogisticRegression(
+    max_iter=1000,
+    random_state=42
 )
 
 model.fit(X_train_tfidf, y_train)
@@ -115,7 +111,7 @@ disp = ConfusionMatrixDisplay(
 
 fig, ax = plt.subplots(figsize=(8, 6))
 disp.plot(ax=ax, cmap="Blues", values_format="d")
-plt.title("Text Model Confusion Matrix - Random Forest")
+plt.title("Text Model Confusion Matrix - Logistic Regression")
 plt.show()
 
 # -------------------------------------------------
@@ -124,5 +120,5 @@ plt.show()
 joblib.dump(model, BASE_DIR / "models" / "text_model.pkl")
 joblib.dump(vectorizer, BASE_DIR / "models" / "tfidf_vectorizer.pkl")
 
-print("Random Forest text modeli kaydedildi.")
+print("Logistic Regression text modeli kaydedildi.")
 print("TF-IDF vectorizer kaydedildi.")
