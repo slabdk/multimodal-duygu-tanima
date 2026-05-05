@@ -335,7 +335,7 @@ def fuse_predictions(text_probs: np.ndarray, image_probs: np.ndarray):
 # -------------------------------------------------
 st.set_page_config(page_title="Çok Kipli Duygu Tanıma", layout="wide")
 
-st.title("Çok Kipli Duygu Tanıma İstemi")
+st.title("Çok Kipli Duygu Tanıma Sistemi")
 st.write("Metin ve yüz görseli kullanarak duygu tahmini yapar.")
 
 col1, col2 = st.columns(2)
