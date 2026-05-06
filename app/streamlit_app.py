@@ -333,102 +333,185 @@ def fuse_predictions(text_probs: np.ndarray, image_probs: np.ndarray):
 # -------------------------------------------------
 # UI
 # -------------------------------------------------
+# -------------------------------------------------
+# UI
+# -------------------------------------------------
 st.set_page_config(page_title="Çok Kipli Duygu Tanıma", layout="wide")
 
-st.title("Çok Kipli Duygu Tanıma Sistemi")
-st.write("Metin ve yüz görseli kullanarak duygu tahmini yapar.")
+# ---------- CSS ----------
+st.markdown("""
+<style>
+.main-title {
+    font-size: 34px;
+    font-weight: 700;
+    margin-bottom: 5px;
+}
 
+.subtitle {
+    font-size: 16px;
+    color: #aaa;
+    margin-bottom: 25px;
+}
+
+.card {
+    padding: 18px;
+    border-radius: 12px;
+    background-color: #1e1e1e;
+    border: 1px solid #333;
+    margin-bottom: 10px;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# ---------- HEADER ----------
+st.markdown('<div class="main-title">Multimodal Duygu Analizi</div>', unsafe_allow_html=True)
+st.markdown('<div class="subtitle">Metin ve/veya yüz görseli ile duygu tahmini yapabilirsiniz</div>', unsafe_allow_html=True)
+
+# ---------- INPUT ----------
 col1, col2 = st.columns(2)
 
 with col1:
+    st.markdown("### Metin Girişi")
     user_text = st.text_area(
-        "Metni gir",
-        placeholder="Örn: Bugün kendimi çok kötü hissediyorum..."
+        "",
+        placeholder="Bugün kendimi çok kötü hissediyorum..."
     )
 
 with col2:
-    uploaded_image = st.file_uploader(
-        "Yüz görseli yükle",
-        type=["jpg", "jpeg", "png"]
-    )
+    st.markdown("### Görsel Yükleme")
+    uploaded_image = st.file_uploader("", type=["jpg", "jpeg", "png"])
 
+    if uploaded_image:
+        st.image(uploaded_image, caption="Yüklenen Görsel", width=200)
+
+# ---------- BUTTON ----------
 analyze_clicked = st.button("Analiz Et")
 
+# ---------- HELPER UI ----------
+def show_confidence(value):
+    st.progress(float(value))
+    st.write(f"Güven Skoru: {value:.2f}")
+
+def result_card(title, label, confidence, probs):
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.markdown(f"### {title}")
+    st.write(f"**Tahmin:** {label}")
+    show_confidence(confidence)
+
+    with st.expander("Detaylı Olasılıklar"):
+        st.json(probs)
+
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# ---------- ANALYZE ----------
 if analyze_clicked:
-    if not user_text.strip():
-        st.error("Lütfen bir metin gir.")
+
+    has_text = bool(user_text.strip())
+    has_image = uploaded_image is not None
+
+    if not has_text and not has_image:
+        st.error("Lütfen en az bir veri gir.")
         st.stop()
 
-    if uploaded_image is None:
-        st.error("Lütfen bir görsel yükle.")
-        st.stop()
+    # TEXT ONLY
+    if has_text and not has_image:
+        st.info("Mod: Sadece Metin")
 
-    try:
+        text_probs = predict_text(user_text)
+        text_pred = CLASS_NAMES[int(np.argmax(text_probs))]
+        text_conf = float(np.max(text_probs))
+
+        result_card(
+            "Metin Modeli",
+            label_to_turkish(text_pred),
+            text_conf,
+            probs_to_dict(text_probs)
+        )
+
+    # IMAGE ONLY
+    elif has_image and not has_text:
+        st.info("Mod: Sadece Görsel")
+
         pil_image = Image.open(uploaded_image).convert("RGB")
-    except Exception as e:
-        st.error(f"Görsel açılamadı: {e}")
-        st.stop()
 
-    text_probs = predict_text(user_text)
-
-    try:
         image_probs, face_image, face_count = predict_image(pil_image)
-    except Exception as e:
-        st.error(f"Görsel analiz hatası: {e}")
-        st.stop()
 
-    text_pred = CLASS_NAMES[int(np.argmax(text_probs))]
-    image_pred = CLASS_NAMES[int(np.argmax(image_probs))]
+        image_pred = CLASS_NAMES[int(np.argmax(image_probs))]
+        image_conf = float(np.max(image_probs))
 
-    fusion_result = fuse_predictions(text_probs, image_probs)
+        st.image(face_image, caption=f"Yüz sayısı: {face_count}", width=220)
 
-    final_probs = fusion_result["final_probs"]
-    fusion_pred = fusion_result["final_label"]
-    fusion_reason = fusion_result["reason"]
-
-    text_conf = fusion_result["text_conf"]
-    image_conf = fusion_result["image_conf"]
-
-    text_conf_level = fusion_result["text_conf_level"]
-    image_conf_level = fusion_result["image_conf_level"]
-
-    final_conf = fusion_result["final_conf"]
-    final_conf_level = fusion_result["final_conf_level"]
-
-    st.subheader("Sonuçlar")
-
-    result_col1, result_col2, result_col3 = st.columns(3)
-
-    with result_col1:
-        st.markdown("### Metin Modeli")
-        st.write(f"**Tahmin:** {label_to_turkish(text_pred)}")
-        st.write(f"**Güven Skoru:** {text_conf:.2f}")
-        st.write(f"**Güven Seviyesi:** {text_conf_level}")
-        st.json(probs_to_dict(text_probs))
-
-    with result_col2:
-        st.markdown("### Görsel Model")
-        st.write(f"**Tahmin:** {label_to_turkish(image_pred)}")
-        st.write(f"**Güven Skoru:** {image_conf:.2f}")
-        st.write(f"**Güven Seviyesi:** {image_conf_level}")
-        st.image(face_image, caption=f"Tespit edilen yüz (bulunan yüz sayısı: {face_count})", width=220)
-        st.json(probs_to_dict(image_probs))
-
-    with result_col3:
-        st.markdown("### Fusion Sonucu")
-        st.write(f"**Nihai Tahmin:** {label_to_turkish(fusion_pred)}")
-        st.write(f"**Nihai Güven Skoru:** {final_conf:.2f}")
-        st.write(f"**Nihai Güven Seviyesi:** {final_conf_level}")
-        st.write(f"**Karar Nedeni:** {fusion_reason}")
-        st.json(probs_to_dict(final_probs))
-
-    if final_conf_level == "Düşük":
-        st.warning(
-            f"Nihai duygu tahmini: {label_to_turkish(fusion_pred)} "
-            f"(güven seviyesi: {final_conf_level})"
+        result_card(
+            "Görsel Model",
+            label_to_turkish(image_pred),
+            image_conf,
+            probs_to_dict(image_probs)
         )
+
+    # MULTIMODAL
     else:
-        st.success(
-            f"Nihai duygu tahmini: {label_to_turkish(fusion_pred)} "
-            f"(güven seviyesi: {final_conf_level})"
-        )
+        st.info("Mod: Multimodal")
+
+        pil_image = Image.open(uploaded_image).convert("RGB")
+
+        text_probs = predict_text(user_text)
+        image_probs, face_image, face_count = predict_image(pil_image)
+
+        fusion_result = fuse_predictions(text_probs, image_probs)
+
+        text_pred = CLASS_NAMES[int(np.argmax(text_probs))]
+        image_pred = CLASS_NAMES[int(np.argmax(image_probs))]
+        fusion_pred = fusion_result["final_label"]
+
+        st.image(face_image, caption=f"Yüz sayısı: {face_count}", width=220)
+
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            result_card(
+                "Metin Modeli",
+                label_to_turkish(text_pred),
+                fusion_result["text_conf"],
+                probs_to_dict(text_probs)
+            )
+
+        with col2:
+            result_card(
+                "Görsel Model",
+                label_to_turkish(image_pred),
+                fusion_result["image_conf"],
+                probs_to_dict(image_probs)
+            )
+
+        with col3:
+            st.markdown('<div class="card">', unsafe_allow_html=True)
+            st.markdown("### Fusion Sonucu")
+
+            st.write(f"**Nihai Tahmin:** {label_to_turkish(fusion_pred)}")
+            show_confidence(fusion_result["final_conf"])
+
+            st.write(f"**Karar Nedeni:** {fusion_result['reason']}")
+
+            with st.expander("Fusion Detayları"):
+                st.json(probs_to_dict(fusion_result["final_probs"]))
+
+            st.markdown('</div>', unsafe_allow_html=True)
+
+        # ---------------------------
+        # FINAL RESULT BANNER
+        # ---------------------------
+
+        final_label_tr = label_to_turkish(fusion_pred)
+        final_conf = fusion_result["final_conf"]
+        final_conf_level = fusion_result["final_conf_level"]
+
+        st.markdown("---")  # ayırıcı çizgi
+
+        if final_conf_level == "Düşük":
+            st.warning(
+                f"🔴 Nihai Duygu: {final_label_tr} | Güven Seviyesi: {final_conf_level} ({final_conf:.2f})"
+            )
+        else:
+            st.success(
+                f"🟢 Nihai Duygu: {final_label_tr} | Güven Seviyesi: {final_conf_level} ({final_conf:.2f})"
+            )
